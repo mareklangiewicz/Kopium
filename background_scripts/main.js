@@ -706,7 +706,7 @@ const sendRequestHandlers = {
   async reloadVimiumExtension() {
     // Clear the background page's console log, if its console window is open.
     console.clear();
-    browser.runtime.reload();
+    chrome.runtime.reload();
     // Refresh all open tabs, so they get the latest content scripts, and a clear console.
     const tabs = await chrome.tabs.query({});
     for (const tab of tabs) {

@@ -12,7 +12,7 @@
 //  - cancel(): (optional) cancels any pending, cancelable action.
 
 // Set this to true to render relevancy when debugging the ranking scores.
-const showRelevancy = false;
+const showRelevancy = true;
 
 // TODO(philc): Consider moving out the "computeRelevancy" function.
 class Suggestion {
