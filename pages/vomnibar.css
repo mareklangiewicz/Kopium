@@ -60,8 +60,8 @@
 #vomnibar li {
   border-bottom: 1px solid #ddd;
   line-height: 1.1em;
-  padding: 7px 10px;
-  font-size: 16px;
+  padding: 4px 10px;
+  font-size: 14px;
   color: black;
   position: relative;
   display: list-item;
