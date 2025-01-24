@@ -392,6 +392,62 @@ class HistoryCompleter {
   }
 }
 
+class PrefixItem {
+  /**
+   *
+   * @param {string} prefix
+   * @param {string} description
+   */
+  constructor(prefix, description = "") {
+    this.prefix = prefix;
+    this.description = description;
+  }
+}
+
+class PrefixCompleter {
+
+  /**
+   * @param {PrefixItem[]} customItems
+   * @param {boolean} withEngines
+   */
+  constructor(customItems = [], withEngines = true) {
+    this.customItems = customItems;
+    this.engineItems = []; // conditionally updated in method refresh()
+    this.withEngines = withEngines;
+  }
+
+  async refresh() {
+    if (!this.withEngines) {
+      this.engineItems = [];
+      return;
+    }
+    await Settings.onLoaded();
+    const es = UserSearchEngines;
+    es.set(Settings.get("searchEngines"));
+    const kte = es.keywordToEngine;
+    const ks = Object.keys(kte);
+    this.engineItems = ks.map(k => new PrefixItem(k, kte[k].description))
+  }
+
+  async filter({ queryTerms }) {
+    if (queryTerms.length > 1) return [] // TODO_maybe allow to match descriptions or sth? (with small relevancy)
+    const firstTerm = queryTerms[0] || "";
+    let allItems = this.customItems.concat(this.engineItems);
+    let matching = allItems.filter(({prefix}) => prefix.startsWith(firstTerm))
+    return matching.map((item) => {
+      const suggestion = new Suggestion({
+        queryTerms,
+        insertText: item.prefix,
+        description: item.description,
+        url: item.prefix,
+      });
+      // suggestion.relevancy = 10 / (1 + item.prefix.length); // bigger relevancy is higher on the list
+      suggestion.relevancy = 10; // better to keep search engines on top with original order
+      return suggestion;
+    })
+  }
+}
+
 // The domain completer is designed to match a single-word query which looks like it is a domain.
 // This supports the user experience where they quickly type a partial domain, hit tab -> enter, and
 // expect to arrive there.
@@ -598,8 +654,8 @@ class SearchEngineCompleter {
 SearchEngineCompleter.debug = false;
 
 // A completer which calls filter() on many completers, aggregates the results, ranks them, and
-// returns the top 10. All queries from the vomnibar come through a multi completer.
-const maxResults = 10;
+// returns the top 20. All queries from the vomnibar come through a multi completer.
+const maxResults = 20;
 
 class MultiCompleter {
   constructor(completers) {
@@ -627,9 +683,13 @@ class MultiCompleter {
     // Vomnibar.activateTabSelection, where we show the list of open tabs by recency.
     const isTabCompleter = this.completers.length == 1 &&
       this.completers[0] instanceof TabCompleter;
-    if (queryTerms.length == 0 && !isTabCompleter) {
-      return [];
-    }
+    // if (queryTerms.length == 0 && !isTabCompleter) {
+    //   return [];
+    // }
+    // TODO_maybe: more optimized fast cases for PrefixCompleter (also with empty query)?
+    // (but I like to always have some most relevant stuff show up even before entering anything..)
+    // TODO: check if I broke some of these features (or maybe it wasn't working anyway??)
+    // https://github.com/philc/vimium/wiki/Tips-and-Tricks#repeat-recent-vomnibar-queries
 
     const queryMatchesUserSearchEngine = searchEngineCompleter?.getUserSearchEngineForQuery(query);
 
@@ -962,6 +1022,8 @@ Object.assign(globalThis, {
   BookmarkCompleter,
   MultiCompleter,
   HistoryCompleter,
+  PrefixItem,
+  PrefixCompleter,
   DomainCompleter,
   TabCompleter,
   SearchEngineCompleter,

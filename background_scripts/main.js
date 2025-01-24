@@ -24,6 +24,7 @@ const completionSources = {
   domains: new DomainCompleter(),
   tabs: new TabCompleter(),
   searchEngines: new SearchEngineCompleter(),
+  prefixes: new PrefixCompleter()
 };
 
 const completers = {
@@ -33,6 +34,7 @@ const completers = {
     completionSources.domains,
     completionSources.tabs,
     completionSources.searchEngines,
+    completionSources.prefixes,
   ]),
   bookmarks: new MultiCompleter([completionSources.bookmarks]),
   tabs: new MultiCompleter([completionSources.tabs]),
