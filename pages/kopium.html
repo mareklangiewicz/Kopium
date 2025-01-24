@@ -23,12 +23,35 @@
     <script src="../content_scripts/mode_normal.js"></script>
     <script src="../content_scripts/vimium_frontend.js"></script>
     <link rel="stylesheet" type="text/css" href="../content_scripts/vimium.css" />
+    <style>
+      body {
+        background-color: #101a1a;
+        color: #2f508e;
+        zoom: 125%;
+      }
+      ul {
+        list-style-type: none;
+      }
+      code.keys {
+        color: #8ab4f8;
+        width: 2rem;
+        display: inline-block;
+      }
+    </style>
 
+    <!--  FIXME NOW -->
+    <!--      <script type="module" src="kopium-kt.js"></script>-->
+    <!-- TODO LATER: generate kopium-kt.js in this repo (add whole gradle build for kotlin/js) -->
+
+    <script type="module" src="kopium.js"></script>
+    <!--  FIXME temporary minimal script before integrating kotlin generated version -->
   </head>
-  <body id="kopium-newtab" style="background-color: #101a1a">
-    <h1 style="color: #1155cc">Kopium New Tab</h1>
-<!--  FIXME NOW -->
-<!--      <script src="kopium-kt.js"></script>-->
-      <!-- TODO LATER: generate kopium-kt.js in this repo (add whole gradle build for kotlin/js) -->
+  <body id="kopium-newtab">
+  <h1>Kopium New Tab</h1>
+  <h3>Local Key Maps</h3>
+  (enter insert mode first)
+  <ul id="local-keymaps"></ul>
+  <h3>Search Engines</h3>
+  <ul id="search-engines"></ul>
   </body>
 </html>
