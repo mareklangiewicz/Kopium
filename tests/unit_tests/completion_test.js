@@ -3,7 +3,19 @@ import "../../background_scripts/tab_recency.js";
 import "../../background_scripts/bg_utils.js";
 import "../../background_scripts/completion_engines.js";
 import "../../background_scripts/completion_search.js";
-import "../../background_scripts/completion.js";
+import * as userSearchEngines from "../../background_scripts/user_search_engines.js";
+import {
+  BookmarkCompleter,
+  DomainCompleter,
+  HistoryCache,
+  HistoryCompleter,
+  MultiCompleter,
+  RankingUtils,
+  RegexpCache,
+  SearchEngineCompleter,
+  Suggestion,
+  TabCompleter,
+} from "../../background_scripts/completion.js";
 import "../../lib/url_utils.js";
 
 const hours = (n) => 1000 * 60 * 60 * n;
@@ -374,7 +386,7 @@ context("SearchEngineCompleter", () => {
   setup(() => {
     completer = new SearchEngineCompleter();
     const searchEngineConfig = `g: ${googleSearchUrl}%s`;
-    UserSearchEngines.set(searchEngineConfig);
+    userSearchEngines.set(searchEngineConfig);
   });
 
   should("complete search results using the given completer", async () => {
@@ -412,8 +424,7 @@ context("suggestions", () => {
       title: "ninjawords",
       relevancyFunction: returns(1),
     });
-    const expected =
-      "<span class='vomnibarMatch'>ninj</span>a<span class='vomnibarMatch'>words</span>";
+    const expected = "<span class='match'>ninj</span>a<span class='match'>words</span>";
     assert.isTrue(suggestion.generateHtml({}).indexOf(expected) >= 0);
   });
 
@@ -425,7 +436,7 @@ context("suggestions", () => {
       title: "ninjawords",
       relevancyFunction: returns(1),
     });
-    const expected = "<span class='vomnibarMatch'>ninjaword</span>s";
+    const expected = "<span class='match'>ninjaword</span>s";
     assert.isTrue(suggestion.generateHtml({}).indexOf(expected) >= 0);
   });
 

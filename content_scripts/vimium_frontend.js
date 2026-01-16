@@ -5,10 +5,17 @@
 let isEnabledForUrl = true;
 let normalMode = null;
 
+// This is set by initializeFrame. We can only get this frame's ID from the background page.
+globalThis.frameId = null;
+
 // We track whther the current window has the focus or not.
-const windowIsFocused = (function () {
-  let windowHasFocus = null;
-  DomUtils.documentReady(() => windowHasFocus = document.hasFocus());
+let windowHasFocus = null;
+function windowIsFocused() {
+  return windowHasFocus;
+}
+
+function initWindowIsFocused() {
+  DomUtils.documentReady().then(() => windowHasFocus = document.hasFocus());
   globalThis.addEventListener(
     "focus",
     forTrusted(function (event) {
@@ -29,17 +36,13 @@ const windowIsFocused = (function () {
     }),
     true,
   );
-  return () => windowHasFocus;
-})();
+}
 
 // True if this window should be focusable by various Vim commands (e.g. "nextFrame").
-const isWindowFocusable = () => {
+function isWindowFocusable() {
   // Avoid focusing tiny frames. See #1317.
   return !DomUtils.windowIsTooSmall() && (document.body?.tagName.toLowerCase() != "frameset");
-};
-
-// This is set by initializeFrame. We can only get this frame's ID from the background page.
-let frameId = null;
+}
 
 // If an input grabs the focus before the user has interacted with the page, then grab it back (if
 // the grabBackFocus option is set).
@@ -154,7 +157,7 @@ handlerStack.push({
   },
 });
 
-const installModes = function () {
+function installModes() {
   // Install the permanent modes. The permanently-installed insert mode tracks focus/blur events,
   // and activates/deactivates itself accordingly.
   normalMode = new NormalMode();
@@ -168,9 +171,10 @@ const installModes = function () {
   }
   // Return the normalMode object (for the tests).
   return normalMode;
-};
+}
 
-let previousUrl = document.location.href;
+// document is null in our tests.
+let previousUrl = globalThis.document?.location.href;
 
 // When we're informed by the background page that a URL in this tab has changed, we check if we
 // have the correct enabled state (but only if this frame has the focus).
@@ -190,77 +194,6 @@ const checkEnabledAfterURLChange = forTrusted(function (_request) {
   }
 });
 
-//
-// Complete initialization work that should be done prior to DOMReady.
-//
-const initializePreDomReady = async function () {
-  // Run this as early as possible, so the page can't register any event handlers before us.
-  installListeners();
-  // NOTE(philc): I'm blocking further Vimium initialization on this, for simplicity. If necessary
-  // we could allow other tasks to run concurrently.
-  await Settings.onLoaded();
-  checkIfEnabledForUrl();
-
-  const requestHandlers = {
-    getFocusStatus(_request, _sender) {
-      return {
-        focused: windowIsFocused(),
-        focusable: isWindowFocusable(),
-      };
-    },
-    focusFrame(request) {
-      focusThisFrame(request);
-    },
-    getScrollPosition(_ignoredA, _ignoredB) {
-      if (DomUtils.isTopFrame()) {
-        return { scrollX: globalThis.scrollX, scrollY: globalThis.scrollY };
-      }
-    },
-    setScrollPosition,
-    checkEnabledAfterURLChange,
-    runInTopFrame({ sourceFrameId, registryEntry }) {
-      // TODO(philc): it seems to me that we should be able to get rid of this runInTopFrame
-      // command, and instead use chrome.tabs.sendMessage with a frameId 0 from the background page.
-      if (DomUtils.isTopFrame()) {
-        return NormalModeCommands[registryEntry.command](sourceFrameId, registryEntry);
-      }
-    },
-    linkHintsMessage(request, sender) {
-      if (HintCoordinator.willHandleMessage(request.messageType)) {
-        return HintCoordinator[request.messageType](request, sender);
-      }
-    },
-    showMessage(request) {
-      HUD.show(request.message, 2000);
-    },
-  };
-
-  Utils.addChromeRuntimeOnMessageListener(
-    Object.keys(requestHandlers),
-    async function (request, sender) {
-      // Some requests are so frequent and noisy (like checkEnabledAfterURLChange docs.google.com)
-      // that we silence debug logging for just those requests so the rest remains useful.
-      if (!request.silenceLogging) {
-        Utils.debugLog(
-          "frontend.js: onMessage:%otype:%o",
-          request.handler,
-          request.messageType,
-          // request // Often useful for debugging.
-        );
-      }
-      request.isTrusted = true;
-      // Some request are handled elsewhere; ignore them.
-      const shouldHandleMessage = request.handler !== "userIsInteractingWithThePage" &&
-        (isEnabledForUrl ||
-          ["checkEnabledAfterURLChange", "runInTopFrame"].includes(request.handler));
-      const result = shouldHandleMessage
-        ? await requestHandlers[request.handler](request, sender)
-        : null;
-      return result;
-    },
-  );
-};
-
 // If our extension gets uninstalled, reloaded, or updated, the content scripts for the old version
 // become orphaned: they remain running but cannot communicate with the background page or invoke
 // most extension APIs. There is no Chrome API to be notified of this event, so we test for it every
@@ -268,7 +201,7 @@ const initializePreDomReady = async function () {
 const extensionHasBeenUnloaded = () => chrome.runtime?.id == null;
 
 // Wrapper to install event listeners.  Syntactic sugar.
-const installListener = (element, event, callback) => {
+function installListener(element, event, callback) {
   element.addEventListener(
     event,
     forTrusted(function () {
@@ -285,7 +218,7 @@ const installListener = (element, event, callback) => {
     }),
     true,
   );
-};
+}
 
 // Installing or uninstalling listeners is error prone. Instead we elect to check isEnabledForUrl
 // each time so we know whether the listener should run or not.
@@ -317,10 +250,21 @@ const onFocus = forTrusted(function (event) {
 globalThis.addEventListener("focus", onFocus, true);
 globalThis.addEventListener("hashchange", checkEnabledAfterURLChange, true);
 
-const initializeOnDomReady = () => {
+async function initializeOnDomReady() {
   // Tell the background page we're in the domReady state.
-  chrome.runtime.sendMessage({ handler: "domReady" });
-};
+  await chrome.runtime.sendMessage({ handler: "domReady" });
+
+  const isVimiumNewTabPage = document.location.href == Settings.vimiumNewTabPageUrl;
+  if (!isVimiumNewTabPage) return;
+
+  // Show the Vomnibar.
+  await Settings.onLoaded();
+  if (Settings.get("openVomnibarOnNewTabPage")) {
+    await Utils.populateBrowserInfo();
+    DomUtils.injectUserCss();
+    Vomnibar.activate(0, {});
+  }
+}
 
 const onUnload = Utils.makeIdempotent(() => {
   HintCoordinator.exit({ isSuccess: false });
@@ -330,19 +274,19 @@ const onUnload = Utils.makeIdempotent(() => {
   globalThis.removeEventListener("hashchange", checkEnabledAfterURLChange, true);
 });
 
-const setScrollPosition = ({ scrollX, scrollY }) =>
-  DomUtils.documentReady(function () {
-    if (DomUtils.isTopFrame()) {
-      Utils.nextTick(function () {
-        globalThis.focus();
-        document.body.focus();
-        if ((scrollX > 0) || (scrollY > 0)) {
-          Marks.setPreviousPosition();
-          globalThis.scrollTo(scrollX, scrollY);
-        }
-      });
-    }
+function setScrollPosition({ scrollX, scrollY }) {
+  DomUtils.documentReady().then(() => {
+    if (!DomUtils.isTopFrame()) return;
+    Utils.nextTick(function () {
+      globalThis.focus();
+      document.body.focus();
+      if ((scrollX > 0) || (scrollY > 0)) {
+        Marks.setPreviousPosition();
+        globalThis.scrollTo(scrollX, scrollY);
+      }
+    });
   });
+}
 
 const flashFrame = (() => {
   let highlightedFrameElement = null;
@@ -360,7 +304,7 @@ const flashFrame = (() => {
       shadowDOM.appendChild(styleEl);
 
       const frameEl = DomUtils.createElement("div");
-      frameEl.className = "vimiumReset vimiumHighlightedFrame";
+      frameEl.className = "vimium-reset vimium-highlighted-frame";
       shadowDOM.appendChild(frameEl);
     }
 
@@ -372,7 +316,7 @@ const flashFrame = (() => {
 //
 // Called from the backend in order to change frame focus.
 //
-const focusThisFrame = function (request) {
+function focusThisFrame(request) {
   // It should never be the case that we get a forceFocusThisFrame request on a window that isn't
   // focusable, because the background script checks that the window is focusable before sending the
   // focusFrame message.
@@ -389,9 +333,9 @@ const focusThisFrame = function (request) {
       flashFrame();
     }
   });
-};
+}
 
-// Used by focusInput command.
+// Used by the focusInput command.
 globalThis.lastFocusedInput = (function () {
   // Track the most recently focused input element.
   let recentlyFocusedElement = null;
@@ -407,9 +351,87 @@ globalThis.lastFocusedInput = (function () {
   return () => recentlyFocusedElement;
 })();
 
-// Checks if Vimium should be enabled or not based on the top frame's URL.
-const checkIfEnabledForUrl = async () => {
-  const response = await chrome.runtime.sendMessage({ handler: "initializeFrame" });
+const messageHandlers = {
+  getFocusStatus(_request, _sender) {
+    return {
+      focused: windowIsFocused(),
+      focusable: isWindowFocusable(),
+    };
+  },
+  focusFrame(request) {
+    focusThisFrame(request);
+  },
+  getScrollPosition(_ignoredA, _ignoredB) {
+    if (DomUtils.isTopFrame()) {
+      return { scrollX: globalThis.scrollX, scrollY: globalThis.scrollY };
+    }
+  },
+  setScrollPosition,
+  checkEnabledAfterURLChange,
+  runInTopFrame({ sourceFrameId, registryEntry }) {
+    // TODO(philc): it seems to me that we should be able to get rid of this runInTopFrame
+    // command, and instead use chrome.tabs.sendMessage with a frameId 0 from the background page.
+    if (DomUtils.isTopFrame()) {
+      return NormalModeCommands[registryEntry.command](sourceFrameId, registryEntry);
+    }
+  },
+  linkHintsMessage(request, sender) {
+    if (HintCoordinator.willHandleMessage(request.messageType)) {
+      return HintCoordinator[request.messageType](request, sender);
+    }
+  },
+  showMessage(request) {
+    HUD.show(request.message, 2000);
+  },
+};
+
+async function handleMessage(request, sender) {
+  // Some requests are so frequent and noisy (like checkEnabledAfterURLChange on
+  // docs.google.com) that we silence debug logging for just those requests so the rest remain
+  // useful.
+  if (!request.silenceLogging) {
+    Utils.debugLog(
+      "frontend.js: onMessage:%otype:%o",
+      request.handler,
+      request.messageType,
+      // request // Often useful for debugging.
+    );
+  }
+  request.isTrusted = true;
+  // Some request are handled elsewhere in the code base; ignore them here.
+  const shouldHandleMessage = request.handler !== "userIsInteractingWithThePage" &&
+    (isEnabledForUrl ||
+      ["checkEnabledAfterURLChange", "runInTopFrame"].includes(request.handler));
+  if (shouldHandleMessage) {
+    const result = await messageHandlers[request.handler](request, sender);
+    return result;
+  }
+}
+
+//
+// Complete initialization work that should be done prior to DOMReady.
+//
+async function initializePreDomReady() {
+  // Run this as early as possible, so the page can't register any event handlers before us.
+  installListeners();
+  // NOTE(philc): I'm blocking further Vimium initialization on this, for simplicity. If necessary
+  // we could allow other tasks to run concurrently.
+  await checkIfEnabledForUrl();
+
+  Utils.addChromeRuntimeOnMessageListener(
+    Object.keys(messageHandlers),
+    handleMessage,
+  );
+}
+
+// Check if Vimium should be enabled or not based on the top frame's URL.
+async function checkIfEnabledForUrl() {
+  const promises = [];
+  promises.push(chrome.runtime.sendMessage({ handler: "initializeFrame" }));
+  if (!Settings.isLoaded()) {
+    promises.push(Settings.onLoaded());
+  }
+  const [response, ...unused] = await Promise.all(promises);
 
   isEnabledForUrl = response.isEnabledForUrl;
 
@@ -419,55 +441,62 @@ const checkIfEnabledForUrl = async () => {
   Utils._firefoxVersion = response.firefoxVersion;
   Utils._browserInfoLoaded = true;
   // This is the first time we learn what this frame's ID is.
-  frameId = response.frameId;
+  globalThis.frameId = response.frameId;
 
   if (normalMode == null) installModes();
   normalMode.setPassKeys(response.passKeys);
   // Hide the HUD if we're not enabled.
   if (!isEnabledForUrl) HUD.hide(true, false);
-};
-
-// If we are in the help dialog iframe, then HelpDialog is already defined with the necessary
-// functions.
-if (globalThis.HelpDialog == null) {
-  globalThis.HelpDialog = {
-    helpUI: null,
-    isShowing() {
-      return this.helpUI && this.helpUI.showing;
-    },
-    abort() {
-      if (this.isShowing()) {
-        return this.helpUI.hide(false);
-      }
-    },
-
-    toggle(request) {
-      DomUtils.documentComplete(() => {
-        if (!this.helpUI) {
-          this.helpUI = new UIComponent(
-            "pages/help_dialog.html",
-            "vimiumHelpDialogFrame",
-            function () {},
-          );
-        }
-        return this.helpUI;
-      });
-
-      if ((this.helpUI != null) && this.isShowing()) {
-        return this.helpUI.hide();
-      } else if (this.helpUI != null) {
-        return this.helpUI.activate(Object.assign(request, { name: "activate", focus: true }));
-      }
-    },
-  };
 }
 
-initializePreDomReady();
-DomUtils.documentReady(initializeOnDomReady);
+// If this content script is running in the help dialog's iframe, then use the HelpDialogPage's
+// methods to control the dialog. Otherwise, load the help dialog in a UIComponent iframe.
+const HelpDialog = {
+  helpUI: null,
+
+  isShowing() {
+    if (globalThis.isVimiumHelpDialogPage) return true;
+    return this.helpUI && this.helpUI.showing;
+  },
+
+  abort() {
+    if (globalThis.isVimiumHelpDialogPage) throw new Error("This should be impossible.");
+    if (this.isShowing()) {
+      return this.helpUI.hide(false);
+    }
+  },
+
+  async toggle(request) {
+    // If we're in the help dialog page already and the user has typed a key to show the help
+    // dialog, then we should hide it.
+    if (globalThis.isVimiumHelpDialogPage) return HelpDialogPage.hide();
+
+    if (this.helpUI == null) {
+      await DomUtils.documentComplete();
+      this.helpUI = new UIComponent();
+      this.helpUI.load("pages/help_dialog_page.html", "vimium-help-dialog-frame");
+    }
+    if (this.isShowing()) {
+      this.helpUI.hide();
+    } else {
+      return this.helpUI.show(
+        { name: "show" },
+        { focus: true, sourceFrameId: request.sourceFrameId },
+      );
+    }
+  },
+};
+
+const testEnv = globalThis.window == null;
+if (!testEnv) {
+  initWindowIsFocused();
+  initializePreDomReady();
+  DomUtils.documentReady().then(initializeOnDomReady);
+}
 
 Object.assign(globalThis, {
+  HelpDialog,
   handlerStack,
-  frameId,
   windowIsFocused,
   // These are exported for normal mode and link-hints mode.
   focusThisFrame,

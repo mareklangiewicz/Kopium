@@ -1,3 +1,26 @@
+import "../lib/utils.js";
+import "../lib/settings.js";
+import "../lib/url_utils.js";
+import "../background_scripts/tab_recency.js";
+import * as bgUtils from "../background_scripts/bg_utils.js";
+import "../background_scripts/all_commands.js";
+import { Commands } from "../background_scripts/commands.js";
+import * as exclusions from "../background_scripts/exclusions.js";
+import "../background_scripts/completion_engines.js";
+import "../background_scripts/completion_search.js";
+import "../background_scripts/completion.js";
+import "../background_scripts/tab_operations.js";
+import * as marks from "../background_scripts/marks.js";
+
+import {
+  BookmarkCompleter,
+  DomainCompleter,
+  HistoryCompleter,
+  MultiCompleter,
+  SearchEngineCompleter,
+  TabCompleter,
+} from "./completion.js";
+
 // NOTE(philc): This file has many superfluous return statements in its functions, as a result of
 // converting from coffeescript to es6. Many can be removed, but I didn't take the time to
 // diligently track down precisely which return statements could be removed when I was doing the
@@ -42,7 +65,7 @@ const completers = {
 
 // A query dictionary for `chrome.tabs.query` that will return only the visible tabs.
 const visibleTabsQueryArgs = { currentWindow: true };
-if (BgUtils.isFirefox()) {
+if (bgUtils.isFirefox()) {
   // Only Firefox supports hidden tabs.
   visibleTabsQueryArgs.hidden = false;
 }
@@ -174,14 +197,17 @@ function moveTab({ count, tab, registryEntry }) {
   });
 }
 
-const createRepeatCommand = (command) => (function (request) {
-  request.count--;
-  if (request.count >= 0) {
-    // TODO(philc): I think we can remove this return statement, and all returns
-    // from commands built using createRepeatCommand.
-    return command(request, (request) => (createRepeatCommand(command))(request));
-  }
-});
+function createRepeatCommand(command) {
+  return async function (request) {
+    let i = request.count - 1;
+    const r = Object.assign({}, request);
+    delete r.count;
+    while (i >= 0) {
+      i--;
+      await command(r);
+    }
+  };
+}
 
 function nextZoomLevel(currentZoom, steps) {
   // Chrome's default zoom levels.
@@ -190,7 +216,7 @@ function nextZoomLevel(currentZoom, steps) {
   const firefoxLevels = [0.3, 0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.2, 1.33, 1.5, 1.7, 2, 2.4, 3, 4, 5];
 
   let zoomLevels = chromeLevels; // Chrome by default
-  if (BgUtils.isFirefox()) {
+  if (bgUtils.isFirefox()) {
     zoomLevels = firefoxLevels;
   }
 
@@ -217,71 +243,66 @@ const BackgroundCommands = {
   // Create a new tab. Also, with:
   //     map X createTab http://www.bbc.com/news
   // create a new tab with the given URL.
-  createTab: createRepeatCommand(async function (request, callback) {
+  createTab: createRepeatCommand(async function (request) {
     if (request.urls == null) {
       if (request.url) {
         // If the request contains a URL, then use it.
         request.urls = [request.url];
       } else {
         // Otherwise, if we have a registryEntry containing URLs, then use them.
-        // TODO(philc): This would be clearer if we try to detect options (a=b) rather than URLs,
-        // because the syntax for options is well defined ([a-zA-Z]+=\S+).
-        const promises = request.registryEntry.optionList.map((opt) => UrlUtils.isUrl(opt));
+        const options = Object.keys(request.registryEntry.options);
+        const promises = options.map((opt) => UrlUtils.isUrl(opt));
         const isUrl = await Promise.all(promises);
-        const urlList = request.registryEntry.optionList.filter((_, i) => isUrl[i]);
+        const urlList = options.filter((_, i) => isUrl[i]);
         if (urlList.length > 0) {
           request.urls = urlList;
         } else {
           // Otherwise, just create a new tab.
-          let newTabUrl = Settings.get("newTabUrl");
-          if (newTabUrl == "pages/blank.html" || newTabUrl == "pages/kopium.html") {
-            // "pages/blank.html" does not work in incognito mode, so fall back to "chrome://newtab"
-            // instead.
-            newTabUrl = request.tab.incognito
-              ? Settings.defaultOptions.newTabUrl
-              : chrome.runtime.getURL(newTabUrl);
+          let url;
+          const destination = Settings.get("newTabDestination");
+          const customUrl = Settings.get("newTabCustomUrl");
+          if (destination == Settings.newTabDestinations.vimiumNewTabPage) {
+            url = Settings.vimiumNewTabPageUrl;
+          } else if (destination == Settings.newTabDestinations.customUrl && customUrl.length > 0) {
+            url = customUrl;
+          } else {
+            url = UrlUtils.chromeNewTabUrl;
           }
-          request.urls = [newTabUrl];
+          request.urls = [url];
         }
       }
     }
     if (request.registryEntry.options.incognito || request.registryEntry.options.window) {
       // Firefox does not allow an incognito window to be created with the URL about:newtab. It
       // throws this error: "Illegal URL: about:newtab".
-      const urls = request.urls.filter((u) => u != Settings.defaultOptions.newTabUrl);
+      const urls = request.urls.filter((u) => u != UrlUtils.chromeNewTabUrl);
       const windowConfig = {
         url: urls,
         incognito: request.registryEntry.options.incognito || false,
       };
       await chrome.windows.create(windowConfig);
-      callback(request);
     } else {
-      let openNextUrl;
       const urls = request.urls.slice().reverse();
       if (request.position == null) {
         request.position = request.registryEntry.options.position;
       }
-      return (openNextUrl = function (request) {
-        if (urls.length > 0) {
-          return TabOperations.openUrlInNewTab(
-            Object.assign(request, { url: urls.pop() }),
-            openNextUrl,
-          );
-        } else {
-          return callback(request);
-        }
-      })(request);
+      while (urls.length > 0) {
+        const url = urls.pop();
+        const tab = await TabOperations.openUrlInNewTab(Object.assign(request, { url }));
+        // Ensure subsequent invocations of this command place the next tab directly after this one.
+        Object.assign(request, { tab, position: "after", active: false });
+      }
     }
   }),
 
-  duplicateTab: createRepeatCommand((request, callback) => {
-    return chrome.tabs.duplicate(
-      request.tabId,
-      (tab) => callback(Object.assign(request, { tab, tabId: tab.id })),
-    );
+  duplicateTab: createRepeatCommand(async (request) => {
+    const tab = await chrome.tabs.duplicate(request.tabId);
+    // Ensure subsequent invocations of this command place the next tab directly after this one.
+    request.tabId = tab.id;
   }),
 
   moveTabToNewWindow({ count, tab }) {
+    // TODO(philc): Switch to the promise API of chrome.tabs.query.
     chrome.tabs.query(visibleTabsQueryArgs, function (tabs) {
       const activeTabIndex = getTabIndex(tab, tabs);
       const startTabIndex = Math.max(0, Math.min(activeTabIndex, tabs.length - count));
@@ -308,13 +329,13 @@ const BackgroundCommands = {
     await forCountTabs(count, tab, (tab) => {
       // In Firefox, Ctrl-W will not close a pinned tab, but on Chrome, it will. We try to be
       // consistent with each browser's UX for pinned tabs.
-      if (tab.pinned && BgUtils.isFirefox()) return;
+      if (tab.pinned && bgUtils.isFirefox()) return;
       chrome.tabs.remove(tab.id);
     });
   },
-  restoreTab: createRepeatCommand((request, callback) =>
-    chrome.sessions.restore(null, callback(request))
-  ),
+  restoreTab: createRepeatCommand(async (request) => {
+    await chrome.sessions.restore(null);
+  }),
   async togglePinTab({ count, tab }) {
     await forCountTabs(count, tab, (tab) => {
       chrome.tabs.update(tab.id, { pinned: !tab.pinned });
@@ -325,8 +346,8 @@ const BackgroundCommands = {
   moveTabRight: moveTab,
 
   async setZoom({ tabId, registryEntry }) {
-    const zoomLevel = registryEntry.optionList[0] ?? 1;
-    const newZoom = parseFloat(zoomLevel);
+    const level = registryEntry.options?.["level"] ?? "1";
+    const newZoom = parseFloat(level);
     if (!isNaN(newZoom)) {
       chrome.tabs.setZoom(tabId, newZoom);
     }
@@ -391,8 +412,8 @@ const BackgroundCommands = {
   },
 
   async visitPreviousTab({ count, tab }) {
-    await BgUtils.tabRecency.init();
-    let tabIds = BgUtils.tabRecency.getTabsByRecency();
+    await bgUtils.tabRecency.init();
+    let tabIds = bgUtils.tabRecency.getTabsByRecency();
     tabIds = tabIds.filter((tabId) => tabId !== tab.id);
     if (tabIds.length > 0) {
       const id = tabIds[(count - 1) % tabIds.length];
@@ -504,14 +525,13 @@ const HintCoordinator = {
   async prepareToActivateLinkHintsMode(
     tabId,
     originatingFrameId,
-    { modeIndex, isVimiumHelpDialog, isVimiumOptionsPage },
+    { modeIndex, requestedByHelpDialog, isExtensionPage },
   ) {
     const frameIds = await getFrameIdsForTab(tabId);
-    // If link hints was triggered on the Options page, or the Vimium help dialog (which is shown
-    // inside an iframe), we cannot directly retrieve those frameIds using the getFrameIdsForTab.
-    // However, as a workaround, if those pages were the pages activating hints, their frameId is
-    // equal to originatingFrameId
-    const isExtensionPage = isVimiumHelpDialog || isVimiumOptionsPage;
+    // If link hints was triggered on a Vimium extension page (like the vimium help dialog or
+    // options page), we cannot directly retrieve the frameIds for those pages using the
+    // getFrameIdsForTab. However, as a workaround, if those pages were the pages activating hints,
+    // their frameId is equal to originatingFrameId.
     if (isExtensionPage && !frameIds.includes(originatingFrameId)) {
       frameIds.push(originatingFrameId);
     }
@@ -523,7 +543,7 @@ const HintCoordinator = {
           handler: "linkHintsMessage",
           messageType: "getHintDescriptors",
           modeIndex,
-          isVimiumHelpDialog,
+          requestedByHelpDialog,
         },
         { frameId },
       );
@@ -588,14 +608,14 @@ const sendRequestHandlers = {
   getCurrentTabUrl({ tab }) {
     return tab.url;
   },
-  openUrlInNewTab: createRepeatCommand((request, callback) =>
-    TabOperations.openUrlInNewTab(request, callback)
-  ),
-  openUrlInNewWindow(request) {
-    return TabOperations.openUrlInNewWindow(request);
+  openUrlInNewTab: createRepeatCommand(async (request, callback) => {
+    await TabOperations.openUrlInNewTab(request, callback);
+  }),
+  async openUrlInNewWindow(request) {
+    await TabOperations.openUrlInNewWindow(request);
   },
   async openUrlInIncognito(request) {
-    return chrome.windows.create({
+    await chrome.windows.create({
       incognito: true,
       url: await UrlUtils.convertToUrl(request.url),
     });
@@ -624,8 +644,8 @@ const sendRequestHandlers = {
 
   nextFrame: BackgroundCommands.nextFrame,
   selectSpecificTab,
-  createMark: Marks.create.bind(Marks),
-  gotoMark: Marks.goto.bind(Marks),
+  createMark: marks.create,
+  gotoMark: marks.goto,
   // Send a message to all frames in the current tab. If request.frameId is provided, then send
   // messages to only the frame with that ID.
   sendMessageToFrames(request, sender) {
@@ -643,7 +663,7 @@ const sendRequestHandlers = {
   async initializeFrame(request, sender) {
     // Check whether the extension is enabled for the top frame's URL, rather than the URL of the
     // specific frame that sent this request.
-    const enabledState = Exclusions.isEnabledForUrl(sender.tab.url);
+    const enabledState = exclusions.isEnabledForUrl(sender.tab.url);
 
     const isTopFrame = sender.frameId == 0;
     if (isTopFrame) {
@@ -671,7 +691,7 @@ const sendRequestHandlers = {
         },
       };
 
-      if (BgUtils.isFirefox()) {
+      if (bgUtils.isFirefox()) {
         // Only Firefox supports SVG icons.
         iconSet = {
           "enabled": "../icons/action_enabled.svg",
@@ -684,8 +704,8 @@ const sendRequestHandlers = {
     }
 
     const response = Object.assign({
-      isFirefox: BgUtils.isFirefox(),
-      firefoxVersion: await BgUtils.getFirefoxVersion(),
+      isFirefox: bgUtils.isFirefox(),
+      firefoxVersion: await bgUtils.getFirefoxVersion(),
       frameId: sender.frameId,
     }, enabledState);
 
@@ -694,8 +714,8 @@ const sendRequestHandlers = {
 
   async getBrowserInfo() {
     return {
-      isFirefox: BgUtils.isFirefox(),
-      firefoxVersion: await BgUtils.getFirefoxVersion(),
+      isFirefox: bgUtils.isFirefox(),
+      firefoxVersion: await bgUtils.getFirefoxVersion(),
     };
   },
 
@@ -812,7 +832,10 @@ async function showUpgradeMessageIfNecessary(onInstalledDetails) {
   const currentVersion = Utils.getCurrentVersion();
   // We do not show an upgrade message for patch/silent releases. Such releases have the same
   // major and minor version numbers.
-  if (!majorVersionHasIncreased(onInstalledDetails.previousVersion)) {
+  if (
+    !majorVersionHasIncreased(onInstalledDetails.previousVersion) ||
+    Settings.get("hideUpdateNotifications")
+  ) {
     return;
   }
 
@@ -836,7 +859,7 @@ async function showUpgradeMessageIfNecessary(onInstalledDetails) {
       if (id != notificationId) return;
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       const tab = tabs[0];
-      return TabOperations.openUrlInNewTab({
+      TabOperations.openUrlInNewTab({
         tab,
         tabId: tab.id,
         url: "https://github.com/philc/vimium/blob/master/CHANGELOG.md",
@@ -903,7 +926,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     // NOTE(philc): 2023-06-16: we do not install the content scripts in all tabs on Firefox.
     // I believe this is because Firefox does this already. See https://stackoverflow.com/a/37132144
     // for commentary.
-    !BgUtils.isFirefox() &&
+    !bgUtils.isFirefox() &&
     (["chrome_update", "shared_module_update"].includes(details.reason));
   if (shouldInjectContentScripts) injectContentScriptsAndCSSIntoExistingTabs();
 

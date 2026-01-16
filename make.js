@@ -43,7 +43,7 @@ function createFirefoxManifest(manifest) {
   // As of 2023-07-08 Firefox doesn't yet support background.service_worker.
   delete manifest.background["service_worker"];
   Object.assign(manifest.background, {
-    "scripts": ["background_scripts/background.js"],
+    "scripts": ["background_scripts/main.js"],
   });
 
   // This key is only supported by Firefox.
@@ -58,6 +58,9 @@ function createFirefoxManifest(manifest) {
         // development mode, or many extension APIs don't work.
         "id": "{d7742d87-e61d-4b78-b8a1-b469842139fa}",
         "strict_min_version": "112.0",
+        "data_collection_permissions": {
+          "required": ["none"],
+        },
       },
     },
   });
@@ -88,17 +91,42 @@ async function parseManifestFile() {
   return JSON5.parse(await Deno.readTextFile("./manifest.json"));
 }
 
+async function checkForBuildIssues() {
+  // Ensure the version number is properly formed.
+  const chromeManifest = await parseManifestFile();
+  const version = chromeManifest["version"];
+  const versionRegexp = /^\d\.\d+\.\d+$/;
+  if (!versionRegexp.test(version)) {
+    throw new Error(`The version string "${version}" is malformed.`);
+  }
+
+  // Ensure debug logging is turned off.
+  const text = await Deno.readTextFile("./lib/utils.js");
+  if (!text.includes("debug: false")) {
+    throw new Error(
+      "It looks like debug logging is turned on in lib/utils.js. " +
+        "It should be off in builds for the store.",
+    );
+  }
+}
+
 // Builds a zip file for submission to the Chrome and Firefox stores. The output is in dist/.
 async function buildStorePackage() {
+  await checkForBuildIssues();
+
   const excludeList = [
     "*.md",
     ".*",
     "CREDITS",
     "MIT-LICENSE.txt",
+    "build_scripts",
     "dist",
     "make.js",
     "deno.json",
     "deno.lock",
+    // These reload scripts are used for development only and shouldn't appear in the build.
+    "reload.html",
+    "reload.js",
     "test_harnesses",
     "tests",
   ];
@@ -127,6 +155,7 @@ async function buildStorePackage() {
   ]);
   await shell("rsync", rsyncOptions);
 
+  // Build the Firefox / Mozilla Addons store package.
   const firefoxManifest = createFirefoxManifest(chromeManifest);
   await writeDistManifest(firefoxManifest);
   // Exclude PNG icons from the Firefox build, because we use the SVG directly.
@@ -153,7 +182,7 @@ async function buildStorePackage() {
   ]);
 }
 
-const runUnitTests = async () => {
+async function runUnitTests() {
   // Import every test file.
   const dir = path.join(projectPath, "tests/unit_tests");
   const files = Array.from(Deno.readDirSync(dir)).map((f) => f.name).sort();
@@ -164,7 +193,7 @@ const runUnitTests = async () => {
   }
 
   return await shoulda.run();
-};
+}
 
 function setupPuppeteerPageForTests(page) {
   // The "console" event emitted has arguments which are promises. To obtain the values to be
@@ -224,7 +253,7 @@ task("fetch-tlds", [], async () => {
   const doc = new DOMParser().parseFromString(text, "text/html");
   const els = doc.querySelectorAll("span.domain.tld");
   // Each span contains a TLD, e.g. ".com". Trim off the leading period.
-  const domains = Array.from(els).map((el) => el.innerText.slice(1));
+  const domains = Array.from(els).map((el) => el.textContent.slice(1));
   const str = domains.join("\n");
   await Deno.writeTextFile("./resources/tlds.txt", str);
 });
@@ -287,7 +316,7 @@ async function testDom() {
     }
   });
 
-  const files = ["dom_tests.html", "vomnibar_test.html"];
+  const files = ["dom_tests.html"];
   const browser = await puppeteer.launch();
   let success = true;
   for (const file of files) {
@@ -306,7 +335,7 @@ async function testDom() {
     }
     // If we close the puppeteer page (tab) via page.close(), we can get innocuous but noisy output
     // like this:
-    // net::ERR_ABORTED http://localhost:43524/pages/hud.html?dom_tests=true
+    // net::ERR_ABORTED http://localhost:43524/pages/hud_page.html?dom_tests=true
     // There's probably a way to prevent that, but as a work around, we avoid closing the page.
     // browser.close() will close all of its owned pages.
   }
@@ -327,8 +356,14 @@ desc("Run unit and DOM tests");
 task("test", ["test-unit", "test-dom"]);
 
 desc("Builds a zip file for submission to the Chrome and Firefox stores. The output is in dist/");
-task("package", [], async () => {
+task("package", ["write-command-listing"], async () => {
   await buildStorePackage();
+});
+
+desc("Build a static version of command_listing.html, to be hosted on vimium.gihub.io");
+task("write-command-listing", [], async () => {
+  // Run this script in a separate shell so it doesn't pollute our JS environment.
+  await shell("./build_scripts/write_command_listing_page.js", []);
 });
 
 desc("Replaces manifest.json with a Firefox-compatible version, for development");

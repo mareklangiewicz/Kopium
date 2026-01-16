@@ -1,32 +1,45 @@
+import "./all_content_scripts.js";
+import { ExclusionRulesEditor } from "./exclusion_rules_editor.js";
+import { allCommands } from "../background_scripts/all_commands.js";
+import { Commands, KeyMappingsParser } from "../background_scripts/commands.js";
+import * as userSearchEngines from "../background_scripts/user_search_engines.js";
+
 const options = {
   filterLinkHints: "boolean",
-  waitForEnterForFilteredHints: "boolean",
+  grabBackFocus: "boolean",
   hideHud: "boolean",
+  hideUpdateNotifications: "boolean",
+  ignoreKeyboardLayout: "boolean",
   keyMappings: "string",
   linkHintCharacters: "string",
   linkHintNumbers: "string",
-  newTabUrl: "string",
+  newTabCustomUrl: "string",
+  newTabDestination: "option",
   nextPatterns: "string",
+  openVomnibarOnNewTabPage: "boolean",
   previousPatterns: "string",
   regexFindMode: "boolean",
-  ignoreKeyboardLayout: "boolean",
   scrollStepSize: "number",
-  smoothScroll: "boolean",
-  grabBackFocus: "boolean",
   searchEngines: "string",
   settingsVersion: "string", // This is a hidden field.
+  smoothScroll: "boolean",
   userDefinedLinkHintCss: "string",
+  waitForEnterForFilteredHints: "boolean",
 };
 
 const OptionsPage = {
   async init() {
     await Settings.onLoaded();
 
-    const saveOptionsEl = document.querySelector("#saveOptions");
+    const shortcutLabel = document.querySelector("#shortcut-to-save-all");
+    shortcutLabel.textContent = KeyboardUtils.platform == "Mac" ? "Cmd-Enter" : "Ctrl-Enter";
+
+    const saveButton = document.querySelector("#save");
 
     const onUpdated = () => {
-      saveOptionsEl.disabled = false;
-      saveOptionsEl.textContent = "Save changes";
+      this.maintainNewTabUrlView();
+      saveButton.disabled = false;
+      saveButton.textContent = "Save changes";
     };
 
     for (const el of document.querySelectorAll("input, textarea")) {
@@ -38,23 +51,19 @@ const OptionsPage = {
       });
     }
 
-    saveOptionsEl.addEventListener("click", () => this.saveOptions());
-    document.querySelector("#showCommands").addEventListener(
-      "click",
-      () => HelpDialog.toggle({ showAllCommandDetails: true }),
-    );
+    saveButton.addEventListener("click", () => this.saveOptions());
 
-    document.querySelector("#filterLinkHints").addEventListener(
+    this.getOptionEl("filterLinkHints").addEventListener(
       "click",
       () => this.maintainLinkHintsView(),
     );
 
-    document.querySelector("#downloadBackup").addEventListener(
+    document.querySelector("#download-backup").addEventListener(
       "mousedown",
       () => this.onDownloadBackupClicked(),
       true,
     );
-    document.querySelector("#uploadBackup").addEventListener(
+    document.querySelector("#upload-backup").addEventListener(
       "change",
       () => this.onUploadBackupClicked(),
     );
@@ -62,19 +71,24 @@ const OptionsPage = {
     for (const el of document.querySelectorAll(".reset-link a")) {
       el.addEventListener("click", (event) => {
         this.resetInputValue(event);
+        this.showValidationErrors();
         onUpdated();
       });
     }
 
     globalThis.onbeforeunload = () => {
-      if (!saveOptionsEl.disabled) {
+      if (!saveButton.disabled) {
         return "You have unsaved changes to options.";
       }
     };
 
-    document.addEventListener("keyup", (event) => {
+    document.addEventListener("keydown", (event) => {
+      // Firefox on Mac doesn't pass ctrl-enter to our page because MacOS Sequoia treats it as a
+      // shortcut for right click; typing it shows a context menu. So, we also allow cmd-enter to
+      // save all options. Note that ctrl-enter still works on Chrome for some reason.
       const isCtrlEnter = event.ctrlKey && event.keyCode === 13;
-      if (isCtrlEnter) {
+      const isCmdEnter = event.metaKey && event.keyCode === 13;
+      if (isCtrlEnter || isCmdEnter) {
         this.saveOptions();
       }
     });
@@ -86,12 +100,16 @@ const OptionsPage = {
     this.setFormFromSettings(settings);
   },
 
+  getOptionEl(optionName) {
+    return document.querySelector(`*[name="${optionName}"]`);
+  },
+
   // Invoked when the user clicks the "reset" button next to an option's text field.
   resetInputValue(event) {
     const parentDiv = event.target.parentNode.parentNode;
     console.assert(parentDiv?.tagName == "DIV", "Expected parent to be a div", event.target);
     const input = parentDiv.querySelector("input") || parentDiv.querySelector("textarea");
-    const optionName = input.id;
+    const optionName = input.name;
     const defaultValue = Settings.defaultOptions[optionName];
     input.value = defaultValue;
     event.preventDefault();
@@ -99,7 +117,7 @@ const OptionsPage = {
 
   setFormFromSettings(settings) {
     for (const [optionName, optionType] of Object.entries(options)) {
-      const el = document.getElementById(optionName);
+      const el = this.getOptionEl(optionName);
       const value = settings[optionName];
       switch (optionType) {
         case "boolean":
@@ -111,6 +129,10 @@ const OptionsPage = {
         case "string":
           el.value = value;
           break;
+        case "option":
+          const optionEl = document.querySelector(`input[name="${optionName}"][value="${value}"]`);
+          optionEl.checked = true;
+          break;
         default:
           throw new Error(`Unrecognized option type ${optionType}`);
       }
@@ -118,14 +140,15 @@ const OptionsPage = {
 
     ExclusionRulesEditor.setForm(Settings.get("exclusionRules"));
 
-    document.querySelector("#uploadBackup").value = "";
+    document.querySelector("#upload-backup").value = "";
     this.maintainLinkHintsView();
+    this.maintainNewTabUrlView();
   },
 
   getSettingsFromForm() {
     const settings = {};
     for (const [optionName, optionType] of Object.entries(options)) {
-      const el = document.getElementById(optionName);
+      const el = this.getOptionEl(optionName);
       let value;
       switch (optionType) {
         case "boolean":
@@ -136,6 +159,10 @@ const OptionsPage = {
           break;
         case "string":
           value = el.value.trim();
+          break;
+        case "option":
+          const optionEl = document.querySelector(`input[name="${optionName}"]:checked`);
+          value = optionEl.value;
           break;
         default:
           throw new Error(`Unrecognized option type ${optionType}`);
@@ -156,17 +183,33 @@ const OptionsPage = {
     let text, parsed;
 
     // keyMappings field.
-    text = document.getElementById("keyMappings").value.trim();
-    parsed = Commands.parseKeyMappingsConfig(text);
+    text = this.getOptionEl("keyMappings").value.trim();
+    parsed = KeyMappingsParser.parse(text);
     if (parsed.validationErrors.length > 0) {
       results["keyMappings"] = parsed.validationErrors.join("\n");
     }
 
     // searchEngines field.
-    text = document.getElementById("searchEngines").value.trim();
-    parsed = UserSearchEngines.parseConfig(text);
+    text = this.getOptionEl("searchEngines").value.trim();
+    parsed = userSearchEngines.parseConfig(text);
     if (parsed.validationErrors.length > 0) {
       results["searchEngines"] = parsed.validationErrors.join("\n");
+    }
+
+    // linkHintCharacters field.
+    text = this.getOptionEl("linkHintCharacters").value.trim();
+    if (text != this.removeDuplicateChars(text)) {
+      results["linkHintCharacters"] = "This cannot contain duplicate characters.";
+    } else if (text.length <= 1) {
+      results["linkHintCharacters"] = "This must be at least two characters long.";
+    }
+
+    // linkHintNumbers field.
+    text = this.getOptionEl("linkHintNumbers").value.trim();
+    if (text != this.removeDuplicateChars(text)) {
+      results["linkHintNumbers"] = "This cannot contain duplicate characters.";
+    } else if (text.length <= 1) {
+      results["linkHintNumbers"] = "This must be at least two characters long.";
     }
 
     return results;
@@ -177,7 +220,7 @@ const OptionsPage = {
     const exampleEl = el.nextElementSibling;
     const messageEl = document.createElement("div");
     messageEl.classList.add("validation-message");
-    messageEl.innerText = message;
+    messageEl.textContent = message;
     exampleEl.after(messageEl);
   },
 
@@ -195,10 +238,16 @@ const OptionsPage = {
 
     const errors = this.getValidationErrors();
     for (const [optionName, message] of Object.entries(errors)) {
-      const el = document.getElementById(optionName);
+      const el = this.getOptionEl(optionName);
       this.addValidationMessage(el, message);
     }
-
+    // Some options can be hidden in the UI. If they have validation errors, force them to be shown.
+    if (errors["linkHintCharacters"]) {
+      this.showElement(document.querySelector("#link-hint-characters-container"), true);
+    }
+    if (errors["linkHintNumbers"]) {
+      this.showElement(document.querySelector("#link-hint-numbers-container"), true);
+    }
     const hasErrors = Object.keys(errors).length > 0;
     return hasErrors;
   },
@@ -216,13 +265,6 @@ const OptionsPage = {
   },
 
   async saveOptions() {
-    // If linkHintCharacters or linkHintNumbers fields contain duplicate characters, just fix these
-    // fields rather than showing validation errors.
-    for (option of ["linkHintCharacters", "linkHintNumbers"]) {
-      const el = document.getElementById(option);
-      el.value = this.removeDuplicateChars(el.value.trim());
-    }
-
     const hasErrors = this.showValidationErrors();
     if (hasErrors) {
       // TODO(philc): If no fields with validation errors are in view, scroll one of them into view
@@ -231,25 +273,54 @@ const OptionsPage = {
     }
 
     await Settings.setSettings(this.getSettingsFromForm());
-    const el = document.querySelector("#saveOptions");
+    const el = document.querySelector("#save");
     el.disabled = true;
     el.textContent = "Saved";
+  },
+
+  showElement(el, visible) {
+    el.style.display = visible ? null : "none";
+  },
+
+  // Hide or show extra form elements depending on which radio button is selected for
+  // newTabDestination.
+  maintainNewTabUrlView() {
+    const destination = document.querySelector("[name=newTabDestination]:checked").value;
+    this.showElement(
+      document.querySelector("#openVomnibarContainer"),
+      destination == Settings.newTabDestinations.vimiumNewTabPage,
+    );
+    this.showElement(
+      document.querySelector("[name=newTabCustomUrl]"),
+      destination == Settings.newTabDestinations.customUrl,
+    );
   },
 
   // Display the UI for link hint numbers vs. characters, depending upon the value of
   // "filterLinkHints".
   maintainLinkHintsView() {
-    const show = (el, visible) => el.style.display = visible ? null : "none";
-    const isFilteredLinkhints = document.querySelector("#filterLinkHints").checked;
-    show(document.querySelector("#linkHintCharactersContainer"), !isFilteredLinkhints);
-    show(document.querySelector("#linkHintNumbersContainer"), isFilteredLinkhints);
-    show(document.querySelector("#waitForEnterForFilteredHintsContainer"), isFilteredLinkhints);
+    const errors = this.getValidationErrors();
+    const isFilteredLinkhints = this.getOptionEl("filterLinkHints").checked;
+    this.showElement(
+      document.querySelector("#link-hint-characters-container"),
+      !isFilteredLinkhints || errors["linkHintCharacters"],
+    );
+    this.showElement(
+      document.querySelector("#link-hint-numbers-container"),
+      isFilteredLinkhints || errors["linkHintNumbers"],
+    );
+    this.showElement(
+      document.querySelector("#wait-for-enter"),
+      isFilteredLinkhints,
+    );
   },
 
   onDownloadBackupClicked() {
     const backup = Settings.pruneOutDefaultValues(this.getSettingsFromForm());
-    const settingsBlob = new Blob([JSON.stringify(backup, null, 2) + "\n"]);
-    document.querySelector("#downloadBackup").href = URL.createObjectURL(settingsBlob);
+    // Serialize the JSON keys so they're stable across backups. See #4764.
+    const keys = Object.keys(backup).sort();
+    const settingsBlob = new Blob([JSON.stringify(backup, keys, 2) + "\n"]);
+    document.querySelector("#download-backup").href = URL.createObjectURL(settingsBlob);
   },
 
   onUploadBackupClicked() {
@@ -274,9 +345,9 @@ const OptionsPage = {
 
         await Settings.setSettings(backup);
         this.setFormFromSettings(Settings.getSettings());
-        const saveOptionsEl = document.querySelector("#saveOptions");
-        saveOptionsEl.disabled = true;
-        saveOptionsEl.textContent = "Saved";
+        const saveButton = document.querySelector("#save");
+        saveButton.disabled = true;
+        saveButton.textContent = "Saved";
         alert("Settings have been restored from the backup.");
       };
     }
@@ -289,6 +360,3 @@ document.addEventListener("DOMContentLoaded", async () => {
   await Commands.init();
   await OptionsPage.init();
 });
-
-// Exported for use by our tests.
-globalThis.isVimiumOptionsPage = true;

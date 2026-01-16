@@ -205,25 +205,28 @@ const HintCoordinator = {
       }
     });
     this.onExit = [onExit];
+    const protocol = window.location.protocol;
+    // chrome-extension, moz-extension (Firefox), extension (Edge).
+    const isExtensionPage = protocol.endsWith("extension:");
     chrome.runtime.sendMessage({
       handler: "prepareToActivateLinkHintsMode",
       modeIndex: availableModes.indexOf(mode),
-      isVimiumHelpDialog: globalThis.isVimiumHelpDialog,
-      isVimiumOptionsPage: globalThis.isVimiumOptionsPage,
+      isExtensionPage,
+      requestedByHelpDialog: globalThis.isVimiumHelpDialog,
     });
   },
 
   // Returns a list of HintDescriptors. Hint descriptors are global. They include all of the
   // information necessary for each frame to determine whether and when a hint from *any* frame is
   // selected.
-  getHintDescriptors({ modeIndex, isVimiumHelpDialog }, _sender) {
+  getHintDescriptors({ modeIndex, requestedByHelpDialog }, _sender) {
     if (!DomUtils.isReady() || DomUtils.windowIsTooSmall()) return [];
 
     const requireHref = [COPY_LINK_URL, OPEN_INCOGNITO].includes(availableModes[modeIndex]);
     // If link hints is launched within the help dialog, then we only offer hints from that frame.
     // This improves the usability of the help dialog on the options page (particularly for
     // selecting command names).
-    if (isVimiumHelpDialog && !globalThis.isVimiumHelpDialog) {
+    if (requestedByHelpDialog && !globalThis.isVimiumHelpDialog) {
       this.localHints = [];
     } else {
       this.localHints = LocalHints.getLocalHints(requireHref);
@@ -409,8 +412,8 @@ class LinkHintsMode {
   renderHints() {
     if (this.containerEl == null) {
       const div = DomUtils.createElement("div");
-      div.id = "vimiumHintMarkerContainer";
-      div.className = "vimiumReset";
+      div.id = "vimium-hint-marker-container";
+      div.className = "vimium-reset";
       this.containerEl = div;
       document.documentElement.appendChild(div);
     }
@@ -478,8 +481,9 @@ class LinkHintsMode {
       const el = DomUtils.createElement("div");
       el.style.left = localHint.rect.left + "px";
       el.style.top = localHint.rect.top + "px";
-      // Each hint marker is assigned a different z-index.
-      el.className = "vimiumReset internalVimiumHintMarker vimiumHintMarker";
+      // Note that Vimium's CSS is user-customizable. We're adding the "vimiumHintMarker" class here
+      // for users to customize. See further comments about this in vimium.css.
+      el.className = "vimium-reset internal-vimium-hint-marker vimiumHintMarker";
       Object.assign(marker, {
         element: el,
         localHint,
@@ -619,27 +623,40 @@ class LinkHintsMode {
 
   // Rotate the hints' z-index values so that hidden hints become visible.
   rotateHints() {
+    // Partitions array into two arrays, based on the bool return value of predicate.
+    function partition(array, predicate) {
+      const a = [];
+      const b = [];
+      for (const item of array) {
+        const target = predicate(item) ? a : b;
+        target.push(item);
+      }
+      return [a, b];
+    }
+
     // Get local, visible hint markers.
-    const localHintMarkers = this.hintMarkers.filter((m) =>
-      m.isLocalMarker() && (m.element.style.display !== "none")
+    const [localMarkers, otherMarkers] = partition(
+      this.hintMarkers,
+      (m) => m.isLocalMarker() && (m.element.style.display !== "none"),
     );
+
     // Fill in the markers' rects, if necessary.
-    for (const marker of localHintMarkers) {
-      if (marker.markerRect == null) {
-        marker.markerRect = marker.element.getClientRects()[0];
+    for (const m of localMarkers) {
+      if (m.markerRect == null) {
+        m.markerRect = m.element.getClientRects()[0];
       }
     }
 
     // Calculate the overlapping groups of hints. We call each group a "stack". This is O(n^2).
     let stacks = [];
-    for (const marker of localHintMarkers) {
+    for (const m of localMarkers) {
       let stackForThisMarker = null;
       const results = [];
       for (const stack of stacks) {
-        const markerOverlapsThisStack = this.markerOverlapsStack(marker, stack);
+        const markerOverlapsThisStack = this.markerOverlapsStack(m, stack);
         if (markerOverlapsThisStack && (stackForThisMarker == null)) {
           // We've found an existing stack for this marker.
-          stack.push(marker);
+          stack.push(m);
           stackForThisMarker = stack;
           results.push(stack);
         } else if (markerOverlapsThisStack && (stackForThisMarker != null)) {
@@ -655,11 +672,11 @@ class LinkHintsMode {
       stacks = results;
 
       if (stackForThisMarker == null) {
-        stacks.push([marker]);
+        stacks.push([m]);
       }
     }
 
-    const newMarkers = [];
+    let newMarkers = [];
     for (let stack of stacks) {
       if (stack.length > 1) {
         // Push the last element to the beginning.
@@ -667,6 +684,8 @@ class LinkHintsMode {
       }
       newMarkers.push(...stack);
     }
+
+    newMarkers = newMarkers.concat(otherMarkers);
     this.hintMarkers = newMarkers;
     this.renderHints();
   }
@@ -781,6 +800,11 @@ class LinkHintsMode {
 class AlphabetHints {
   constructor() {
     this.linkHintCharacters = Settings.get("linkHintCharacters").toLowerCase();
+    // Ensure we have more than 1 character to generate hint strings. With 1 character, every hint
+    // will be another hint's prefix ("1", "11", ...).
+    if (this.linkHintCharacters.length <= 1) {
+      throw new Error("The linkHintCharacters setting must have more than 1 character.");
+    }
     this.hintKeystrokeQueue = [];
   }
 
@@ -805,7 +829,6 @@ class AlphabetHints {
   // strings may be of different lengths.
   //
   hintStrings(linkCount) {
-    if (this.linkHintCharacters.length == 0) return [];
     let hints = [""];
     let offset = 0;
     while (((hints.length - offset) < linkCount) || (hints.length === 1)) {
@@ -846,6 +869,12 @@ class AlphabetHints {
 class FilterHints {
   constructor() {
     this.linkHintNumbers = Settings.get("linkHintNumbers").toUpperCase();
+    // Ensure we have more than 1 character to generate hint strings. With 1 character, every hint
+    // will be another hint's prefix ("1", "11", ...).
+    if (this.linkHintNumbers.length <= 1) {
+      throw new Error("The linkHintNumbers setting must have more than 1 character.");
+    }
+
     this.hintKeystrokeQueue = [];
     this.linkTextKeystrokeQueue = [];
     this.activeHintMarker = null;
@@ -1031,7 +1060,7 @@ class FilterHints {
 const spanWrap = (hintString) => {
   const innerHTML = [];
   for (const char of hintString) {
-    innerHTML.push("<span class='vimiumReset'>" + char + "</span>");
+    innerHTML.push("<span class='vimium-reset'>" + char + "</span>");
   }
   return innerHTML.join("");
 };
@@ -1115,6 +1144,7 @@ const LocalHints = {
         "menuitemcheckbox",
         "menuitemradio",
         "radio",
+        "textbox",
       ];
       if (role != null && clickableRoles.includes(role.toLowerCase())) {
         isClickable = true;
@@ -1213,6 +1243,12 @@ const LocalHints = {
       possibleFalsePositive = true;
     }
 
+    // If the span is clickable but wraps something else that is clickable, we want to instead favor
+    // showing hints for descendants which are clickable. Flag the span as a possible false postive.
+    if (tagName == "span") {
+      possibleFalsePositive = true;
+    }
+
     // Elements with tabindex are sometimes useful, but usually not. We can treat them as second
     // class citizens when it improves UX, so take special note of them.
     const tabIndexValue = element.getAttribute("tabindex");
@@ -1271,7 +1307,9 @@ const LocalHints = {
     stack.push(element);
 
     if (element && element.shadowRoot) {
-      return LocalHints.getElementFromPoint(x, y, element.shadowRoot, stack);
+      // A shadow root can contain just a text node; see #4620. In that case, return the shadow root
+      // itself.
+      return LocalHints.getElementFromPoint(x, y, element.shadowRoot, stack) || element;
     }
 
     return element;
@@ -1514,5 +1552,6 @@ Object.assign(globalThis, {
   LinkHintsMode,
   LocalHints,
   AlphabetHints,
+  FilterHints,
   WaitForEnter,
 });
