@@ -396,61 +396,67 @@ export class HistoryCompleter {
   }
 }
 
-class PrefixItem {
-  /**
-   *
-   * @param {string} prefix
-   * @param {string} description
-   */
-  constructor(prefix, description = "") {
-    this.prefix = prefix;
-    this.description = description;
-  }
-}
-
-class PrefixCompleter {
-
-  /**
-   * @param {PrefixItem[]} customItems
-   * @param {boolean} withEngines
-   */
-  constructor(customItems = [], withEngines = true) {
-    this.customItems = customItems;
-    this.engineItems = []; // conditionally updated in method refresh()
-    this.withEngines = withEngines;
-  }
-
-  async refresh() {
-    if (!this.withEngines) {
-      this.engineItems = [];
-      return;
-    }
-    await Settings.onLoaded();
-    const es = UserSearchEngines;
-    es.set(Settings.get("searchEngines"));
-    const kte = es.keywordToEngine;
-    const ks = Object.keys(kte);
-    this.engineItems = ks.map(k => new PrefixItem(k, kte[k].description))
-  }
-
-  async filter({ queryTerms }) {
-    if (queryTerms.length > 1) return [] // TODO_maybe allow to match descriptions or sth? (with small relevancy)
-    const firstTerm = queryTerms[0] || "";
-    let allItems = this.customItems.concat(this.engineItems);
-    let matching = allItems.filter(({prefix}) => prefix.startsWith(firstTerm))
-    return matching.map((item) => {
-      const suggestion = new Suggestion({
-        queryTerms,
-        insertText: item.prefix,
-        description: item.description,
-        url: item.prefix,
-      });
-      // suggestion.relevancy = 10 / (1 + item.prefix.length); // bigger relevancy is higher on the list
-      suggestion.relevancy = 10; // better to keep search engines on top with original order
-      return suggestion;
-    })
-  }
-}
+// TODO NOW: What was I doing here exactly?
+// How is this PrefixCompleter suppose to work?
+// Analyze, first analyze other completers with TESTS!!
+// then write tests for my completer too and make sure it works
+// then enable it in ./main.js
+//
+// export class PrefixItem {
+//   /**
+//    *
+//    * @param {string} prefix
+//    * @param {string} description
+//    */
+//   constructor(prefix, description = "") {
+//     this.prefix = prefix;
+//     this.description = description;
+//   }
+// }
+//
+// export class PrefixCompleter {
+//
+//   /**
+//    * @param {PrefixItem[]} customItems
+//    * @param {boolean} withEngines
+//    */
+//   constructor(customItems = [], withEngines = true) {
+//     this.customItems = customItems;
+//     this.engineItems = []; // conditionally updated in method refresh()
+//     this.withEngines = withEngines;
+//   }
+//
+//   async refresh() {
+//     if (!this.withEngines) {
+//       this.engineItems = [];
+//       return;
+//     }
+//     await Settings.onLoaded();
+//     const es = UserSearchEngines;
+//     es.set(Settings.get("searchEngines"));
+//     const kte = es.keywordToEngine;
+//     const ks = Object.keys(kte);
+//     this.engineItems = ks.map(k => new PrefixItem(k, kte[k].description))
+//   }
+//
+//   async filter({ queryTerms }) {
+//     if (queryTerms.length > 1) return [] // TODO_maybe allow to match descriptions or sth? (with small relevancy)
+//     const firstTerm = queryTerms[0] || "";
+//     let allItems = this.customItems.concat(this.engineItems);
+//     let matching = allItems.filter(({prefix}) => prefix.startsWith(firstTerm))
+//     return matching.map((item) => {
+//       const suggestion = new Suggestion({
+//         queryTerms,
+//         insertText: item.prefix,
+//         description: item.description,
+//         url: item.prefix,
+//       });
+//       // suggestion.relevancy = 10 / (1 + item.prefix.length); // bigger relevancy is higher on the list
+//       suggestion.relevancy = 10; // better to keep search engines on top with original order
+//       return suggestion;
+//     })
+//   }
+// }
 
 // The domain completer is designed to match a single-word query which looks like it is a domain.
 // This supports the user experience where they quickly type a partial domain, hit tab -> enter, and
@@ -1026,17 +1032,3 @@ HistoryCache.binarySearch = function (targetElement, array, compareFunction) {
   }
 };
 
-Object.assign(globalThis, {
-  Suggestion,
-  BookmarkCompleter,
-  MultiCompleter,
-  HistoryCompleter,
-  PrefixItem,
-  PrefixCompleter,
-  DomainCompleter,
-  TabCompleter,
-  SearchEngineCompleter,
-  HistoryCache,
-  RankingUtils,
-  RegexpCache,
-});

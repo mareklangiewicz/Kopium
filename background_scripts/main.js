@@ -18,6 +18,7 @@ import {
   HistoryCompleter,
   MultiCompleter,
   SearchEngineCompleter,
+  // PrefixCompleter, // disabled; see comment at definition in ./completion.js
   TabCompleter,
 } from "./completion.js";
 
@@ -47,7 +48,7 @@ const completionSources = {
   domains: new DomainCompleter(),
   tabs: new TabCompleter(),
   searchEngines: new SearchEngineCompleter(),
-  prefixes: new PrefixCompleter()
+  // prefixes: new PrefixCompleter() // disabled; see comment at definition in ./completion.js
 };
 
 const completers = {
@@ -57,7 +58,7 @@ const completers = {
     completionSources.domains,
     completionSources.tabs,
     completionSources.searchEngines,
-    completionSources.prefixes,
+    // completionSources.prefixes, // disabled; see comment at definition in ./completion.js
   ]),
   bookmarks: new MultiCompleter([completionSources.bookmarks]),
   tabs: new MultiCompleter([completionSources.tabs]),
