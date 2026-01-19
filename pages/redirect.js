@@ -1,4 +1,4 @@
-const vimiumBlankNewTabUrl = "https://mareklangiewicz.pl/kopium/board/";
+const vimiumBlankNewTabUrl = "https://mareklangiewicz.pl/Kopium/board/";
 const settings = await chrome.storage.sync.get(null);
 const isCustom = settings.destinationType == "custom" && settings.customUrl?.length > 0;
 let url;

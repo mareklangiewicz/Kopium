@@ -68,7 +68,7 @@ self.addEventListener("fetch", (event) => {
   // page is found and returned instantly. As a workaround, we just return the hardcoded contents of
   // index.html without checking the cache.
   const url = new URL(event.request.url);
-  if (url.pathname === "kopium/board/index.html" || url.pathname == "kopium/board/") {
+  if (url.pathname === "Kopium/board/index.html" || url.pathname == "Kopium/board/") {
     event.respondWith(
       new Response(index_html, {
         headers: { "Content-Type": "text/html; charset=utf-8" },

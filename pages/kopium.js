@@ -7,7 +7,7 @@ document.addEventListener('keydown', function(event) {onKeyDown(event)});
 async function initDom() {
 
   await Settings.onLoaded();
-  UserSearchEngines.set(Settings.get("searchEngines")); // FIXME: this is really bad/temporary?
+  // UserSearchEngines.set(Settings.get("searchEngines")); // FIXME: this is really bad/temporary?
 
   let key;
   let rowsHtml = "";
@@ -15,8 +15,8 @@ async function initDom() {
   document.querySelector("#local-keymaps").innerHTML = rowsHtml
 
   rowsHtml = "";
-  let kte = UserSearchEngines.keywordToEngine;
-  for (key in kte) rowsHtml += `<li><code class="keys">${key}</code>${kte[key].description}</li>`
+  // let kte = UserSearchEngines.keywordToEngine;
+  // for (key in kte) rowsHtml += `<li><code class="keys">${key}</code>${kte[key].description}</li>`
   document.querySelector("#search-engines").innerHTML = rowsHtml
 }
 
