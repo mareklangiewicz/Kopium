@@ -1,0 +1,132 @@
+body {
+  padding: 10px;
+  margin: 0 auto;
+  font-family: "Helvetica Neue", "Lucida Grande", Helvetica, Arial, Verdana, sans-serif;
+  font-family: sans-serif;
+  max-width: 900px;
+  line-height: 1.5;
+}
+
+header {
+  padding-top: 20px;
+  display: flex;
+  flex-direction: row;
+  width: 100%;
+  align-items: flex-start;
+}
+
+h1 {
+  font-weight: normal;
+  font-size: 50px;
+  padding: 0;
+  margin: 0;
+  /* TODO(philc): Use flex layout to vertically center this. */
+  margin-top: 5px;
+  line-height: 100%;
+}
+
+header img#logo {
+  margin-right: 16px;
+  width: 60px;
+}
+
+header img#github {
+  width: 40px;
+}
+
+header #logo-text {
+  flex-grow: 1;
+}
+
+h2 {
+  margin: 16px 0;
+  color: #555;
+}
+
+h3 {
+  color: #696969;
+}
+
+a {
+  color: #5173a7;
+}
+
+a:hover {
+  color: black;
+}
+
+#video {
+  /* Prevent horizontal scrolling on phones. */
+  overflow-x: hidden;
+}
+
+@media (min-width: 700px) {
+  ul {
+    padding: 0;
+    margin: 0;
+  }
+
+  #feature-list {
+    padding-right: 16px;
+  }
+
+  #video {
+    float: right;
+    padding-left: 8px;
+  }
+
+  #keyboard-shortcuts {
+    display: flex;
+  }
+}
+
+#install-links a {
+  font-weight: bold;
+  display: block;
+  margin: 5px 0;
+}
+
+h2.keyboard-shortcuts {
+  margin-bottom: 0;
+}
+
+#keyboard-shortcuts ol {
+  list-style-type: none;
+  padding: 0;
+  margin: 0;
+}
+
+#keyboard-shortcuts span {
+  float: left;
+  width: 5ch;
+  font-weight: bold;
+}
+
+footer {
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background-color: #1e1f21;
+    color: #eeeff1;
+  }
+  a {
+    color: #bad7ff;
+  }
+  img#github {
+    filter: invert(1);
+  }
+
+  h2 {
+    color: #bbb;
+  }
+
+  h3 {
+    color: #999;
+  }
+  a:hover {
+    color: black;
+  }
+}
