@@ -698,9 +698,14 @@ export class MultiCompleter {
     // Vomnibar.activateTabSelection, where we show the list of open tabs by recency.
     const isTabCompleter = this.completers.length == 1 &&
       this.completers[0] instanceof TabCompleter;
-    // if (queryTerms.length == 0 && !isTabCompleter) {
-    //   return [];
-    // }
+
+    // TODO: I think I like to show stuff before even one letter, but commenting
+    // this original condition out makes tests fail, so first analyze tests, make sure
+    // what exact behaviour I want, then maybe update tests and this condition below.
+    if (queryTerms.length == 0 && !isTabCompleter) {
+      return [];
+    }
+
     // TODO_maybe: more optimized fast cases for PrefixCompleter (also with empty query)?
     // (but I like to always have some most relevant stuff show up even before entering anything..)
     // TODO: check if I broke some of these features (or maybe it wasn't working anyway??)
