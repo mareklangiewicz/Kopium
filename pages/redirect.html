@@ -9,6 +9,11 @@
          will use its default colors for blank pages. This reduces flicker when opening this
          redirect.html page as a new tab.. -->
     <script src="redirect.js" type="module"></script>
+    <!--
+    I tried to inline redirect.js into redirect.html for performance, but chrome forbits it with error:
+    Executing inline script violates the following Content Security Policy directive 'script-src 'self''.
+    (there is a workaround but way to cumbersome to maintain on each change)
+    -->
   </head>
 
   <body></body>

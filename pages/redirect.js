@@ -1,24 +1,20 @@
 
-const vimiumNewTabPageUrl = "https://mareklangiewicz.pl/Kopium/board/";
-// keep synced with ../lib/settings.js
+// region [[My Nice New Tab Pages]]
 
-const settings = await chrome.storage.sync.get(null);
-const isCustom = settings.destinationType == "custom" && settings.customUrl?.length > 0;
-let url;
-if (isCustom) {
-  url = settings.customUrl;
-} else {
-  url = vimiumNewTabPageUrl;
-}
+const myNiceNewTabPagesUrls = {
+  // TODO my own black, dark, light, white, etc mini html only pages (with/without offline service workers??)
+  miniDarkExample1: "https://scaulfield7.github.io/html-only-website-in-dark-mode/",
+  kopiumBoard: "https://mareklangiewicz.pl/Kopium/board/", // defined here in kopium project, published by github actions.
+  vimiumGithub: "https://vimium.github.io/new-tab/", // from yet another: https://github.com/vimium/vimium.github.io 
+  chromeNewTabPage: "chrome://new-tab-page",
+  chromeNewTabRedirecting: "chrome://newtab", // same as about:newtab ; DO NOT use to redirect new tab - potential loop!
+  chromeAboutPages: "chrome://about", // nice list of all? chrome special pages, but not as new tab page
+};
 
-document.location.href = url;
+const myNewPageUrl = myNiceNewTabPagesUrls.kopiumBoard;
 
-// If a custom URL is used and it's a file:// URL, consider using chrome.tabs.update in Chrome, so
-// that the redirection works; otherwise it will fail with a security error. However, with this
-// method, the keyboard focus will remain in Chrome's URL bar, rather than on the page. Second, this
-// only works in Chrome; Firefox prevents using chrome.tabs.update to load a file:// URL. See
-// https://github.com/philc/vimium/issues/4741.
-//
-// const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-// const tab = tabs[0];
-// await chrome.tabs.update(tab.id, { url });
+// endregion [[My Nice New Tab Pages]]
+
+document.location.replace(myNewPageUrl);
+// BTW replace(..) instead of href = .. avoids adding to history
+
