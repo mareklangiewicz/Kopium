@@ -290,6 +290,7 @@ const BackgroundCommands = {
           }
           request.urls = [url];
           */
+          // In Kopium I ignore user new tab settings and use hardcoded region.
           request.urls = [myNewPageUrl];
         }
       }

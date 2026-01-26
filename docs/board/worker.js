@@ -3,6 +3,7 @@ const index_html = `
 <!DOCTYPE html>
 <!-- Based on https://github.com/vimium/vimium.github.io/tree/master/new-tab/ -->
 <!-- NOTE: This HTML must be kept in sync between index.html and worker.js. -->
+<!-- region [[Kopium Board Html]] -->
 <html>
   <head>
     <meta charset="UTF-8">
@@ -59,6 +60,7 @@ const index_html = `
     registerServiceWorker();
   </script>
 </html>
+<!-- endregion [[Kopium Board Html]] -->
 `;
 
 self.addEventListener("fetch", (event) => {

@@ -1,6 +1,8 @@
 import "../lib/url_utils.js";
 
-document.addEventListener("DOMContentLoaded", async () => initDom());
+// TODO NOW: move useful stuff to kopium board and remove this kopium page
+
+document.addEventListener("DOMContentLoaded", () => initDom());
 
 document.addEventListener('keydown', function(event) {onKeyDown(event)});
 
