@@ -29,24 +29,6 @@ import {
 
 import * as TabOperations from "./tab_operations.js";
 
-
-// region [[My Nice New Tab Pages]]
-
-const myNiceNewTabPagesUrls = {
-  // TODO my own black, dark, light, white, etc mini html only pages (with/without offline service workers??)
-  miniDarkExample1: "https://scaulfield7.github.io/html-only-website-in-dark-mode/",
-  kopiumBoard: "https://mareklangiewicz.pl/Kopium/board/", // defined here in kopium project, published by github actions.
-  vimiumGithub: "https://vimium.github.io/new-tab/", // from yet another: https://github.com/vimium/vimium.github.io 
-  chromeNewTabPage: "chrome://new-tab-page",
-  chromeNewTabRedirecting: "chrome://newtab", // same as about:newtab ; DO NOT use to redirect new tab - potential loop!
-  chromeAboutPages: "chrome://about", // nice list of all? chrome special pages, but not as new tab page
-};
-
-const myNewPageUrl = myNiceNewTabPagesUrls.kopiumBoard;
-
-// endregion [[My Nice New Tab Pages]]
-
-
 // Allow Vimium's content scripts to access chrome.storage.session. Otherwise,
 // chrome.storage.session will be null in content scripts.
 chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" });
@@ -277,7 +259,6 @@ const BackgroundCommands = {
           request.urls = urlList;
         } else {
           // Otherwise, just create a new tab.
-          /*
           let url;
           const destination = Settings.get("newTabDestination");
           const customUrl = Settings.get("newTabCustomUrl");
@@ -289,9 +270,6 @@ const BackgroundCommands = {
             url = UrlUtils.chromeNewTabUrl;
           }
           request.urls = [url];
-          */
-          // In Kopium I ignore user new tab settings and use hardcoded region.
-          request.urls = [myNewPageUrl];
         }
       }
     }
